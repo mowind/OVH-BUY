@@ -1048,12 +1048,21 @@ const ServersPage = () => {
       console.log("用户选择的配置详情:", formattedOptions);
       console.log("提交的配置选项:", userSelectedOptions);
 
+      const createUuid = () => globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+      const intentId = createUuid();
+      const groupId = createUuid();
+
       // 为每个选中的数据中心创建一个抢购请求（转换数据中心代码）
+      // 同一批次共享 groupId，避免多个机房并发成功导致重复下单
       const promises = datacenters.map(datacenter => 
         api.post(`/queue`, {
           planCode: server.planCode,
           datacenter: convertDisplayDcToApiDc(datacenter),  // 转换为OVH API代码
           options: userSelectedOptions,
+          intentId,
+          groupId,
+          slotIndex: 1,
+          source: 'servers_page',
         })
       );
       

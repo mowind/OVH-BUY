@@ -11,6 +11,7 @@ interface StatsType {
   availableServers: number;
   purchaseSuccess: number;
   purchaseFailed: number;
+  purchaseRisk: number;
   queueProcessorRunning?: boolean;
   monitorRunning?: boolean;
 }
@@ -33,6 +34,7 @@ const Dashboard = () => {
     availableServers: 0,
     purchaseSuccess: 0,
     purchaseFailed: 0,
+    purchaseRisk: 0,
     queueProcessorRunning: true,
     monitorRunning: false,
   });
@@ -97,7 +99,7 @@ const Dashboard = () => {
         variants={containerVariants}
         initial="hidden"
         animate="visible"
-        className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6"
+        className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 xl:grid-cols-4 gap-4 sm:gap-6"
       >
         {/* 活跃队列 */}
         <motion.div variants={itemVariants} className="cyber-card relative overflow-hidden flex flex-col">
@@ -220,6 +222,41 @@ const Dashboard = () => {
                 <line x1="3" y1="10" x2="21" y2="10"></line>
               </svg>
               <span className="leading-none">查看历史</span>
+              <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="flex-shrink-0">
+                <path d="m9 18 6-6-6-6"/>
+              </svg>
+            </Link>
+          </div>
+        </motion.div>
+
+        {/* 风险订单 */}
+        <motion.div variants={itemVariants} className="cyber-card relative overflow-hidden flex flex-col">
+          <div className="absolute top-0 right-0 w-16 h-16 -mr-6 -mt-6 bg-red-500/10 rounded-full blur-xl"></div>
+          <div className="flex justify-between items-start flex-1 min-h-[60px]">
+            <div>
+              <h3 className="text-cyber-muted text-sm mb-1">风险订单</h3>
+              {isLoading ? (
+                <div className="h-8 w-16 bg-cyber-grid animate-pulse rounded"></div>
+              ) : (
+                <p className="text-3xl font-cyber font-bold text-red-400">{stats.purchaseRisk}</p>
+              )}
+            </div>
+            <div className="p-2 bg-red-500/10 rounded-full">
+              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-red-400">
+                <path d="M12 9v4"></path>
+                <path d="M12 17h.01"></path>
+                <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
+              </svg>
+            </div>
+          </div>
+          <div className="mt-4 text-cyber-muted text-xs h-5 flex items-center">
+            <Link to="/history" className="inline-flex items-center gap-1.5 hover:text-red-400 transition-colors font-medium">
+              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-red-400 flex-shrink-0">
+                <path d="M12 9v4"></path>
+                <path d="M12 17h.01"></path>
+                <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
+              </svg>
+              <span className="leading-none">查看风险订单</span>
               <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="flex-shrink-0">
                 <path d="m9 18 6-6-6-6"/>
               </svg>

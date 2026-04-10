@@ -5,7 +5,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { useAPI } from "@/context/APIContext";
 import { api } from "@/utils/apiClient";
 import { toast } from "sonner";
-import { XIcon, RefreshCwIcon, PlusIcon, SearchIcon, PlayIcon, PauseIcon, Trash2Icon, ArrowUpDownIcon, HeartIcon } from 'lucide-react';
+import { XIcon, RefreshCwIcon, PlusIcon, SearchIcon, PlayIcon, PauseIcon, Trash2Icon, ArrowUpDownIcon, HeartIcon, CopyIcon } from 'lucide-react';
 import { useIsMobile } from "@/hooks/use-mobile";
 import { 
   API_URL, 
@@ -20,14 +20,25 @@ import { OVH_DATACENTERS, DatacenterInfo } from "@/config/ovhConstants";
 
 interface QueueItem {
   id: string;
+  intentId?: string;
+  groupId?: string;
+  slotIndex?: number;
   planCode: string;
   datacenter: string;
   options: string[];
-  status: "pending" | "running" | "paused" | "completed" | "failed";
+  requestedOptions?: string[];
+  requiredOptions?: string[];
+  matchedOptions?: string[];
+  actualCartOptions?: string[];
+  strictConfig?: boolean;
+  status: "pending" | "running" | "paused" | "completed" | "failed" | "cancelled";
+  phase?: string;
   createdAt: string;
   updatedAt: string;
   retryInterval: number;
   retryCount: number;
+  failureCode?: string | null;
+  failureDetail?: string | null;
 }
 
 interface ServerOption {
@@ -51,7 +62,20 @@ interface ServerPlan {
   availableOptions: ServerOption[];
 }
 
+const shortId = (value?: string | null) => value ? value.slice(0, 8) : "-";
+
 const QueuePage = () => {
+  const copyText = async (label: string, value?: string | null) => {
+    if (!value) return;
+    try {
+      await navigator.clipboard.writeText(value);
+      toast.success(`${label} 已复制`);
+    } catch (error) {
+      console.error(`Failed to copy ${label}:`, error);
+      toast.error(`复制${label}失败`);
+    }
+  };
+
   const isMobile = useIsMobile();
   const { isAuthenticated } = useAPI();
   const [queueItems, setQueueItems] = useState<QueueItem[]>([]);
@@ -127,15 +151,23 @@ const QueuePage = () => {
 
     toast.info(`正在创建 ${totalTasks} 个抢购任务...`);
 
-    // 为每个数据中心创建指定数量的独立任务
-    for (const dc of selectedDatacenters) {
-      for (let i = 0; i < finalQuantity; i++) {
+    const createUuid = () => globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    const intentId = createUuid();
+    const groupIds = Array.from({ length: finalQuantity }, () => createUuid());
+
+    // 同一数量槽位下的多个机房共享同一个 groupId，确保最多只成功 1 单
+    for (let i = 0; i < finalQuantity; i++) {
+      for (const dc of selectedDatacenters) {
         try {
           await api.post(`/queue`, {
             planCode: planCodeInput.trim(),
             datacenter: dc,
             retryInterval: finalRetryInterval,
-            options: selectedOptions, // 传递可选配置参数
+            options: selectedOptions,
+            intentId,
+            groupId: groupIds[i],
+            slotIndex: i + 1,
+            source: 'queue_page',
           });
           successCount++;
         } catch (error) {
@@ -484,7 +516,8 @@ const QueuePage = () => {
                 />
                 <div className="mt-2 p-2 bg-yellow-500/10 border border-yellow-500/30 rounded">
                   <p className="text-[10px] text-yellow-400 leading-relaxed">
-                    ⚠️ <strong>重要提示：</strong>如您提供的可选参数不正确，系统将使用默认配置下单。请务必在
+                    ⚠️ <strong>重要提示：</strong>如您提供的可选参数不正确，系统将不会按默认配置偷偷下单；
+                    它会在严格配置校验失败后停止本次结账并重试/记录失败。请务必在
                     <a 
                       href="https://api.ovh.com/1.0/order/catalog/public/eco?ovhSubsidiary=IE" 
                       target="_blank" 
@@ -647,6 +680,36 @@ const QueuePage = () => {
                       {item.planCode}
                     </span>
                     <span className="text-sm text-cyber-text-dimmed">DC: {item.datacenter.toUpperCase()}</span>
+                    {item.groupId && (
+                      <button
+                        type="button"
+                        onClick={() => copyText('Group ID', item.groupId)}
+                        className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] bg-cyber-grid/20 text-cyber-muted rounded-full font-mono hover:bg-cyber-grid/30"
+                        title={item.groupId}
+                      >
+                        Group {shortId(item.groupId)}
+                        <CopyIcon size={10} />
+                      </button>
+                    )}
+                    {item.slotIndex && (
+                      <span className="px-2 py-0.5 text-[10px] bg-cyber-grid/20 text-cyber-muted rounded-full">
+                        Slot #{item.slotIndex}
+                      </span>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => copyText('Task ID', item.id)}
+                      className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] bg-cyber-grid/20 text-cyber-muted rounded-full font-mono hover:bg-cyber-grid/30"
+                      title={item.id}
+                    >
+                      Task {shortId(item.id)}
+                      <CopyIcon size={10} />
+                    </button>
+                    {item.strictConfig && (
+                      <span className="px-2 py-0.5 text-[10px] bg-yellow-500/15 text-yellow-300 rounded-full">
+                        严格配置
+                      </span>
+                    )}
                     {item.options && item.options.length > 0 && (
                       <span className="px-2 py-0.5 text-xs bg-cyber-accent/20 text-cyber-accent rounded-full">
                         含 {item.options.length} 个可选配置
@@ -654,11 +717,21 @@ const QueuePage = () => {
                     )}
                   </div>
                   <p className="text-xs text-cyber-muted">
-                    下次尝试: {item.retryCount > 0 ? `${item.retryInterval}秒后 (第${item.retryCount + 1}次)` : `即将开始` } | 创建于: {new Date(item.createdAt).toLocaleString()}
+                    阶段: {item.phase || 'queued'} | 下次尝试: {item.retryCount > 0 ? `${item.retryInterval}秒后 (第${item.retryCount + 1}次)` : `即将开始` } | 创建于: {new Date(item.createdAt).toLocaleString()}
                   </p>
-                  {item.options && item.options.length > 0 && (
-                    <p className="text-xs text-cyber-muted mt-1">
-                      📦 可选配置: {item.options.join(', ')}
+                  {(item.requestedOptions && item.requestedOptions.length > 0) && (
+                    <p className="text-xs text-cyber-muted mt-1 break-all">
+                      🎯 请求配置: {item.requestedOptions.join(', ')}
+                    </p>
+                  )}
+                  {(item.actualCartOptions && item.actualCartOptions.length > 0) && (
+                    <p className="text-xs text-cyber-muted mt-1 break-all">
+                      🛒 实际购物车配置: {item.actualCartOptions.join(', ')}
+                    </p>
+                  )}
+                  {item.failureCode && (
+                    <p className="text-xs text-red-300 mt-1 break-all">
+                      ❌ {item.failureCode}{item.failureDetail ? `：${item.failureDetail}` : ''}
                     </p>
                   )}
                 </div>

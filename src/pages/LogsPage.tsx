@@ -11,6 +11,7 @@ interface LogEntry {
   level: "INFO" | "WARNING" | "ERROR" | "DEBUG";
   message: string;
   source: string;
+  context?: Record<string, unknown> | null;
 }
 
 const LogsPage = () => {
@@ -105,9 +106,14 @@ const LogsPage = () => {
     if (searchTerm) {
       const term = searchTerm.toLowerCase();
       filtered = filtered.filter(
-        log => 
-          log.message.toLowerCase().includes(term) ||
-          log.source.toLowerCase().includes(term)
+        log => {
+          const contextText = log.context ? JSON.stringify(log.context).toLowerCase() : "";
+          return (
+            log.message.toLowerCase().includes(term) ||
+            log.source.toLowerCase().includes(term) ||
+            contextText.includes(term)
+          );
+        }
       );
     }
     
@@ -120,6 +126,25 @@ const LogsPage = () => {
       scrollToBottom();
     }
   }, [filteredLogs, autoRefresh, searchTerm, filterLevel]);
+
+  const renderContext = (context?: Record<string, unknown> | null) => {
+    if (!context || Object.keys(context).length === 0) return null;
+
+    return (
+      <div className="mt-1.5 flex flex-wrap gap-1.5">
+        {Object.entries(context).map(([key, value]) => (
+          <span
+            key={key}
+            className="inline-flex items-center gap-1 rounded border border-cyber-grid/30 bg-cyber-grid/10 px-1.5 py-0.5 text-[10px] text-cyber-muted break-all"
+            title={`${key}=${String(value)}`}
+          >
+            <span className="text-cyber-accent/80">{key}</span>
+            <span>{String(value)}</span>
+          </span>
+        ))}
+      </div>
+    );
+  };
 
   // Get background color based on log level
   const getLogLevelStyle = (level: string) => {
@@ -307,6 +332,7 @@ const LogsPage = () => {
                       </div>
                       <div className="text-slate-200 text-xs leading-relaxed break-words">
                         {log.message}
+                        {renderContext(log.context)}
                       </div>
                     </div>
                   ) : (
@@ -344,6 +370,7 @@ const LogsPage = () => {
                       {/* 消息 */}
                       <div className="flex-1 text-slate-200 text-xs leading-relaxed break-words overflow-wrap-anywhere min-w-0">
                         {log.message}
+                        {renderContext(log.context)}
                       </div>
                     </div>
                   )}

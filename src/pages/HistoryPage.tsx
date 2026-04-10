@@ -7,13 +7,25 @@ import { useToast } from "@/components/ToastContainer";
 
 interface PurchaseHistory {
   id: string;
+  taskId?: string;
+  intentId?: string;
+  groupId?: string;
+  slotIndex?: number;
   planCode: string;
   datacenter: string;
   options?: string[];
-  status: "success" | "failed";
+  requestedOptions?: string[];
+  requiredOptions?: string[];
+  matchedOptions?: string[];
+  actualCartOptions?: string[];
+  status: "success" | "failed" | "cancelled";
+  phase?: string;
   orderId?: string;
   orderUrl?: string;
   errorMessage?: string;
+  failureCode?: string | null;
+  failureDetail?: string | null;
+  optionValidationPassed?: boolean;
   purchaseTime: string;
   expirationTime?: string; // 订单过期时间（可选，如果没有则从 purchaseTime + 15天计算）
   price?: {
@@ -23,6 +35,20 @@ interface PurchaseHistory {
     currencyCode?: string;
   };
 }
+
+const shortId = (value?: string | null) => value ? value.slice(0, 8) : "-";
+
+const normalizeOptions = (options?: string[]) =>
+  (options || []).map(option => option.trim()).filter(Boolean).sort();
+
+const hasConfigMismatch = (item: PurchaseHistory) => {
+  if (item.status !== "success") return false;
+  const requested = normalizeOptions(item.requestedOptions || item.options);
+  const actual = normalizeOptions(item.actualCartOptions);
+  if (requested.length === 0 || actual.length === 0) return false;
+  if (requested.length !== actual.length) return true;
+  return requested.some((value, index) => value !== actual[index]);
+};
 
 // 订单有效期（分钟）- 15 天 = 15 * 24 * 60 = 21600 分钟
 const ORDER_VALIDITY_MINUTES = 15 * 24 * 60; // 15天
@@ -94,18 +120,21 @@ const useOrderCountdown = (purchaseTime: string, expirationTime?: string) => {
 };
 
 // 移动端订单卡片组件
-const MobileOrderCard = ({ item }: { item: PurchaseHistory }) => {
+const MobileOrderCard = ({ item, onCopy }: { item: PurchaseHistory; onCopy: (label: string, value?: string | null) => void }) => {
   const showCountdown = item.status === "success" && item.orderId;
   const countdown = showCountdown ? useOrderCountdown(item.purchaseTime, item.expirationTime) : null;
   const isExpired = countdown?.isExpired ?? false;
+  const hasMismatch = hasConfigMismatch(item);
   
   return (
     <motion.div
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
-      className={`p-4 bg-cyber-grid/10 rounded-lg border border-cyber-accent/20 space-y-2 ${
-        isExpired ? "opacity-60" : ""
-      }`}
+      className={`p-4 bg-cyber-grid/10 rounded-lg border space-y-2 ${
+        hasMismatch
+          ? 'border-red-500/40 bg-red-500/5'
+          : 'border-cyber-accent/20'
+      } ${isExpired ? "opacity-60" : ""}`}
     >
       <div className="flex justify-between items-start">
         <div className={isExpired ? "line-through" : ""}>
@@ -118,9 +147,11 @@ const MobileOrderCard = ({ item }: { item: PurchaseHistory }) => {
           <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
             item.status === "success" 
               ? "bg-green-500/20 text-green-400" 
+              : item.status === "cancelled"
+              ? "bg-yellow-500/20 text-yellow-300"
               : "bg-red-500/20 text-red-400"
           }`}>
-            {item.status === "success" ? "成功" : "失败"}
+            {item.status === "success" ? "成功" : item.status === "cancelled" ? "取消" : "失败"}
           </span>
           {showCountdown && (
             <div className={`text-[10px] px-2 py-0.5 rounded ${
@@ -133,12 +164,27 @@ const MobileOrderCard = ({ item }: { item: PurchaseHistory }) => {
               {isExpired ? "订单支付已过期" : countdown?.countdownText}
             </div>
           )}
+          {hasMismatch && (
+            <div className="text-[10px] px-2 py-0.5 rounded bg-red-500/20 text-red-300">
+              ⚠️ 错配风险
+            </div>
+          )}
         </div>
       </div>
       
-      {item.options && item.options.length > 0 && (
+      {(item.requestedOptions && item.requestedOptions.length > 0) && (
         <div className={`text-xs text-cyber-text-dimmed pt-2 border-t border-cyber-grid/30 ${isExpired ? "line-through" : ""}`}>
-          <span className="text-cyber-muted">配置：</span> {item.options.join(', ')}
+          <span className="text-cyber-muted">请求配置：</span> {item.requestedOptions.join(', ')}
+        </div>
+      )}
+      {(item.actualCartOptions && item.actualCartOptions.length > 0) && (
+        <div className={`text-xs ${hasMismatch ? 'text-red-300' : 'text-cyber-text-dimmed'} ${isExpired ? "line-through" : ""}`}>
+          <span className="text-cyber-muted">实际配置：</span> {item.actualCartOptions.join(', ')}
+        </div>
+      )}
+      {hasMismatch && (
+        <div className="text-[11px] text-red-300 border border-red-500/30 bg-red-500/10 rounded px-2 py-1">
+          请求配置与实际配置不一致，请优先核查该订单。
         </div>
       )}
       
@@ -153,9 +199,40 @@ const MobileOrderCard = ({ item }: { item: PurchaseHistory }) => {
         </div>
       )}
       
+      {(item.groupId || item.taskId) && (
+        <div className={`text-xs text-cyber-text-dimmed flex flex-wrap items-center gap-2 ${isExpired ? "line-through" : ""}`}>
+          {item.groupId && (
+            <button
+              type="button"
+              onClick={() => onCopy('Group ID', item.groupId)}
+              className="px-2 py-0.5 rounded bg-cyber-grid/20 hover:bg-cyber-grid/30 font-mono"
+              title={item.groupId}
+            >
+              Group {shortId(item.groupId)}
+            </button>
+          )}
+          {item.taskId && (
+            <button
+              type="button"
+              onClick={() => onCopy('Task ID', item.taskId)}
+              className="px-2 py-0.5 rounded bg-cyber-grid/20 hover:bg-cyber-grid/30 font-mono"
+              title={item.taskId}
+            >
+              Task {shortId(item.taskId)}
+            </button>
+          )}
+        </div>
+      )}
       {item.orderId && (
-        <div className={`text-xs text-cyber-text-dimmed ${isExpired ? "line-through" : ""}`}>
-          <span className="text-cyber-muted">订单ID：</span> {item.orderId}
+        <div className={`text-xs text-cyber-text-dimmed flex flex-wrap items-center gap-2 ${isExpired ? "line-through" : ""}`}>
+          <span><span className="text-cyber-muted">订单ID：</span> {item.orderId}</span>
+          <button
+            type="button"
+            onClick={() => onCopy('订单ID', item.orderId)}
+            className="px-2 py-0.5 rounded bg-cyber-grid/20 hover:bg-cyber-grid/30"
+          >
+            复制
+          </button>
         </div>
       )}
       
@@ -170,12 +247,12 @@ const MobileOrderCard = ({ item }: { item: PurchaseHistory }) => {
         >
           查看订单
         </a>
-      ) : item.status === "failed" && item.errorMessage ? (
+      ) : (item.status === "failed" || item.status === "cancelled") && (item.errorMessage || item.failureCode || item.failureDetail) ? (
         <button
-          onClick={() => toast.info(item.errorMessage || "")}
+          onClick={() => toast.info([item.failureCode, item.failureDetail, item.errorMessage].filter(Boolean).join('\n'))}
           className="inline-block mt-2 px-3 py-1 text-xs text-red-400 border border-red-400/30 rounded hover:bg-red-400/10 transition-colors"
         >
-          查看错误
+          查看详情
         </button>
       ) : null}
     </motion.div>
@@ -183,16 +260,19 @@ const MobileOrderCard = ({ item }: { item: PurchaseHistory }) => {
 };
 
 // 桌面端订单行组件
-const DesktopOrderRow = ({ item }: { item: PurchaseHistory }) => {
+const DesktopOrderRow = ({ item, onCopy }: { item: PurchaseHistory; onCopy: (label: string, value?: string | null) => void }) => {
   const showCountdown = item.status === "success" && item.orderId;
   const countdown = showCountdown ? useOrderCountdown(item.purchaseTime, item.expirationTime) : null;
   const isExpired = countdown?.isExpired ?? false;
+  const hasMismatch = hasConfigMismatch(item);
   
   return (
     <motion.tr 
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
-      className={`hover:bg-cyber-grid/10 transition-colors ${isExpired ? "opacity-60" : ""}`}
+      className={`transition-colors ${
+        hasMismatch ? 'bg-red-500/5 hover:bg-red-500/10' : 'hover:bg-cyber-grid/10'
+      } ${isExpired ? "opacity-60" : ""}`}
     >
       <td className="px-3 py-2.5 font-medium text-cyber-accent text-xs">
         <div className={`max-w-[120px] truncate ${isExpired ? "line-through" : ""}`} title={item.planCode}>
@@ -202,11 +282,20 @@ const DesktopOrderRow = ({ item }: { item: PurchaseHistory }) => {
       <td className={`px-3 py-2.5 text-cyber-text-dimmed text-xs whitespace-nowrap ${isExpired ? "line-through" : ""}`}>
         {item.datacenter.toUpperCase()}
       </td>
-      <td className={`px-3 py-2.5 text-xs text-cyber-text-dimmed max-w-[200px] ${isExpired ? "line-through" : ""}`}>
-        <div className="break-words line-clamp-2" title={item.options && item.options.length > 0 ? item.options.join(', ') : '默认配置'}>
-          {item.options && item.options.length > 0 
-            ? item.options.join(', ')
-            : '默认配置'}
+      <td className={`px-3 py-2.5 text-xs text-cyber-text-dimmed max-w-[260px] ${isExpired ? "line-through" : ""}`}>
+        <div className="space-y-1">
+          <div className="break-words line-clamp-2" title={item.requestedOptions && item.requestedOptions.length > 0 ? item.requestedOptions.join(', ') : '默认配置'}>
+            <span className="text-cyber-muted">请求：</span>
+            {item.requestedOptions && item.requestedOptions.length > 0 
+              ? item.requestedOptions.join(', ')
+              : '默认配置'}
+          </div>
+          {item.actualCartOptions && item.actualCartOptions.length > 0 && (
+            <div className={`break-words line-clamp-2 ${hasMismatch ? 'text-red-300' : ''}`} title={item.actualCartOptions.join(', ')}>
+              <span className="text-cyber-muted">实际：</span>
+              {item.actualCartOptions.join(', ')}
+            </div>
+          )}
         </div>
       </td>
       <td className={`px-3 py-2.5 text-xs whitespace-nowrap ${isExpired ? "line-through" : ""}`}>
@@ -230,9 +319,11 @@ const DesktopOrderRow = ({ item }: { item: PurchaseHistory }) => {
           <span className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium ${
             item.status === "success" 
               ? "bg-green-500/20 text-green-400" 
+              : item.status === "cancelled"
+              ? "bg-yellow-500/20 text-yellow-300"
               : "bg-red-500/20 text-red-400"
           }`}>
-            {item.status === "success" ? "成功" : "失败"}
+            {item.status === "success" ? "成功" : item.status === "cancelled" ? "取消" : "失败"}
           </span>
           {showCountdown && (
             <div className={`text-[9px] px-1.5 py-0.5 rounded ${
@@ -245,17 +336,54 @@ const DesktopOrderRow = ({ item }: { item: PurchaseHistory }) => {
               {isExpired ? "订单支付已过期" : countdown?.countdownText}
             </div>
           )}
+          {hasMismatch && (
+            <div className="text-[9px] px-1.5 py-0.5 rounded bg-red-500/20 text-red-300">
+              错配风险
+            </div>
+          )}
         </div>
       </td>
       <td className={`px-3 py-2.5 text-cyber-text-dimmed text-xs ${isExpired ? "line-through" : ""}`}>
-        <div className="max-w-[140px] truncate" title={new Date(item.purchaseTime).toLocaleString()}>
-          {new Date(item.purchaseTime).toLocaleString('zh-CN', {
-            month: '2-digit',
-            day: '2-digit',
-            hour: '2-digit',
-            minute: '2-digit',
-            hour12: false
-          }).replace(/\//g, '-')}
+        <div className="max-w-[180px] space-y-1">
+          <div title={new Date(item.purchaseTime).toLocaleString()}>
+            {new Date(item.purchaseTime).toLocaleString('zh-CN', {
+              month: '2-digit',
+              day: '2-digit',
+              hour: '2-digit',
+              minute: '2-digit',
+              hour12: false
+            }).replace(/\//g, '-')}
+          </div>
+          {(item.groupId || item.taskId) && (
+            <div className="text-[10px] text-cyber-muted flex flex-wrap gap-1.5">
+              {item.groupId && (
+                <button
+                  type="button"
+                  onClick={() => onCopy('Group ID', item.groupId)}
+                  className="px-1.5 py-0.5 rounded bg-cyber-grid/20 hover:bg-cyber-grid/30 font-mono"
+                  title={item.groupId}
+                >
+                  G:{shortId(item.groupId)}
+                </button>
+              )}
+              {item.taskId && (
+                <button
+                  type="button"
+                  onClick={() => onCopy('Task ID', item.taskId)}
+                  className="px-1.5 py-0.5 rounded bg-cyber-grid/20 hover:bg-cyber-grid/30 font-mono"
+                  title={item.taskId}
+                >
+                  T:{shortId(item.taskId)}
+                </button>
+              )}
+            </div>
+          )}
+          {item.failureCode && (
+            <div className="text-[10px] text-red-300 break-all">{item.failureCode}</div>
+          )}
+          {hasMismatch && (
+            <div className="text-[10px] text-red-300 break-all">REQUEST_ACTUAL_MISMATCH</div>
+          )}
         </div>
       </td>
       <td className="px-3 py-2.5 whitespace-nowrap">
@@ -270,19 +398,26 @@ const DesktopOrderRow = ({ item }: { item: PurchaseHistory }) => {
           >
             订单
           </a>
-        ) : item.status === "failed" && item.errorMessage ? (
+        ) : (item.status === "failed" || item.status === "cancelled") && (item.errorMessage || item.failureCode || item.failureDetail) ? (
           <button
-            onClick={() => toast.info(item.errorMessage || "")}
+            onClick={() => toast.info([item.failureCode, item.failureDetail, item.errorMessage].filter(Boolean).join('\n'))}
             className="text-red-400 hover:text-red-400/80 transition-colors text-xs"
           >
-            错误
+            详情
           </button>
         ) : (
           "-"
         )}
         {item.orderId && (
-          <div className={`text-[10px] text-cyber-text-dimmed mt-0.5 max-w-[100px] truncate ${isExpired ? "line-through" : ""}`} title={item.orderId}>
-            {item.orderId}
+          <div className={`text-[10px] text-cyber-text-dimmed mt-0.5 flex items-center gap-1.5 ${isExpired ? "line-through" : ""}`}>
+            <div className="max-w-[100px] truncate" title={item.orderId}>{item.orderId}</div>
+            <button
+              type="button"
+              onClick={() => onCopy('订单ID', item.orderId)}
+              className="px-1.5 py-0.5 rounded bg-cyber-grid/20 hover:bg-cyber-grid/30"
+            >
+              复制
+            </button>
           </div>
         )}
       </td>
@@ -291,12 +426,23 @@ const DesktopOrderRow = ({ item }: { item: PurchaseHistory }) => {
 };
 
 const HistoryPage = () => {
+  const copyText = async (label: string, value?: string | null) => {
+    if (!value) return;
+    try {
+      await navigator.clipboard.writeText(value);
+      toast.success(`${label} 已复制`);
+    } catch (error) {
+      console.error(`Failed to copy ${label}:`, error);
+      toast.error(`复制${label}失败`);
+    }
+  };
+
   const isMobile = useIsMobile();
   const { showConfirm } = useToast();
   const [history, setHistory] = useState<PurchaseHistory[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false); // 区分初始加载和刷新
-  const [filterStatus, setFilterStatus] = useState<"all" | "success" | "failed">("all");
+  const [filterStatus, setFilterStatus] = useState<"all" | "success" | "failed" | "cancelled">("all");
   const [searchTerm, setSearchTerm] = useState("");
   const [filteredHistory, setFilteredHistory] = useState<PurchaseHistory[]>([]);
 
@@ -364,10 +510,21 @@ const HistoryPage = () => {
     if (searchTerm) {
       const term = searchTerm.toLowerCase();
       filtered = filtered.filter(
-        item => 
-          item.planCode.toLowerCase().includes(term) ||
-          item.datacenter.toLowerCase().includes(term) ||
-          (item.orderId && item.orderId.toLowerCase().includes(term))
+        item => {
+          const requestedText = item.requestedOptions?.join(', ').toLowerCase() || '';
+          const actualText = item.actualCartOptions?.join(', ').toLowerCase() || '';
+          return (
+            item.planCode.toLowerCase().includes(term) ||
+            item.datacenter.toLowerCase().includes(term) ||
+            (item.orderId && item.orderId.toLowerCase().includes(term)) ||
+            (item.groupId && item.groupId.toLowerCase().includes(term)) ||
+            (item.taskId && item.taskId.toLowerCase().includes(term)) ||
+            (item.failureCode && item.failureCode.toLowerCase().includes(term)) ||
+            (hasConfigMismatch(item) && ["错配", "mismatch", "risk"].some(keyword => keyword.includes(term) || term.includes(keyword))) ||
+            requestedText.includes(term) ||
+            actualText.includes(term)
+          );
+        }
       );
     }
     
@@ -407,12 +564,13 @@ const HistoryPage = () => {
           <div>
             <select
               value={filterStatus}
-              onChange={(e) => setFilterStatus(e.target.value as "all" | "success" | "failed")}
+              onChange={(e) => setFilterStatus(e.target.value as "all" | "success" | "failed" | "cancelled")}
               className="cyber-input w-full"
             >
               <option value="all">所有状态</option>
               <option value="success">成功</option>
               <option value="failed">失败</option>
+              <option value="cancelled">取消</option>
             </select>
           </div>
           
@@ -469,7 +627,7 @@ const HistoryPage = () => {
           /* 移动端：卡片布局 */
           <div className="p-2 space-y-3">
             {filteredHistory.map((item) => (
-              <MobileOrderCard key={item.id} item={item} />
+              <MobileOrderCard key={item.id} item={item} onCopy={copyText} />
             ))}
           </div>
         ) : (
@@ -483,13 +641,13 @@ const HistoryPage = () => {
                   <th className="px-3 py-2.5 text-left">配置选项</th>
                   <th className="px-3 py-2.5 text-left">价格</th>
                   <th className="px-3 py-2.5 text-left">状态</th>
-                  <th className="px-3 py-2.5 text-left">购买时间</th>
+                  <th className="px-3 py-2.5 text-left">时间 / 追踪</th>
                   <th className="px-3 py-2.5 text-left">操作</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-cyber-grid/20">
                 {filteredHistory.map((item) => (
-                  <DesktopOrderRow key={item.id} item={item} />
+                  <DesktopOrderRow key={item.id} item={item} onCopy={copyText} />
                 ))}
               </tbody>
             </table>
